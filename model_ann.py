@@ -15,6 +15,7 @@ import tensorflow as tf
 import numpy as np
 import os
 from utils import *
+import math
 
 class ANN(object):
 
@@ -39,7 +40,7 @@ class ANN(object):
 				for j in range(0, int(train_X.shape[0] / self.__batch_size)):
 					x_input = train_X[j * self.__batch_size: (j + 1) * self.__batch_size]
 					y_input = train_Y[j * self.__batch_size: (j + 1) * self.__batch_size]
-					loss, _ = sess.run([self.__cross_entropy, self.__train_step],
+					loss, _ = sess.run([self.__loss, self.__train_step],
 					                   feed_dict={self.__x_input: x_input, self.__y_input: y_input})
 					loss_total += loss
 				print("step{}, training loss {}".format(i, loss_total))
@@ -58,23 +59,15 @@ class ANN(object):
 			else:
 				print("load model failed!")
 			currect_count = 0
-			s = 0
-			for j in range(0, int(test_X.shape[0] / self.__batch_size)):
-				x_input = test_X[j * self.__batch_size: (j + 1) * self.__batch_size]
-				y_label = test_Y[j * self.__batch_size: (j + 1) * self.__batch_size]
-				y_output = sess.run(self.__y_output, feed_dict={self.__x_input : x_input})
-				for i in range(self.__batch_size):
-					if np.argmax(y_output[i]) == np.argmax(y_label[i]):
-						currect_count += 1
-					s += 1
-			x_input = test_X[int(test_X.shape[0] / self.__batch_size) * self.__batch_size : ]
-			y_label = test_Y[int(test_X.shape[0] / self.__batch_size) * self.__batch_size : ]
-			y_output = sess.run(self.__y_output, feed_dict={self.__x_input : x_input})
-			for i in range(len(y_output)):
-				if np.argmax(y_output[i]) == np.argmax(y_label[i]):
+			score_total = 0
+			for i in range(len(test_X)):
+				x_input = test_X[i].reshape((1,self.__input_size))
+				y_output = sess.run(self.__y_output, feed_dict={self.__x_input: x_input})
+				y_output = y_output.reshape((self.__output_size,))
+				score_total += math.pow(np.argmax(y_output) - np.argmax(test_Y[i]), 2)
+				if np.argmax(y_output) == np.argmax(test_Y[i]):
 					currect_count += 1
-			s += len(test_X) - int(test_X.shape[0] / self.__batch_size) * self.__batch_size
-			print("accuracy:{}----{}".format(float(currect_count)/len(test_X), s / len(test_X)))
+			print("accuracy:{}, sorce:{}".format(float(currect_count)/len(test_Y), score_total/len(test_Y)))
 
 	def predict(self, X_input):
 		lines = ['id,happiness\n']
@@ -102,22 +95,30 @@ class ANN(object):
 		self.__b1 = tf.Variable(tf.random_normal([64], stddev=0.01))
 		self.__oper_1 = tf.nn.relu(tf.matmul(self.__x_input, self.__w1) + self.__b1)
 
-		self.__w2 = tf.Variable(tf.random_normal([64, 16], stddev=0.01))
-		self.__b2 = tf.Variable(tf.random_normal([16], stddev=0.01))
+		self.__w2 = tf.Variable(tf.random_normal([64, 32], stddev=0.01))
+		self.__b2 = tf.Variable(tf.random_normal([32], stddev=0.01))
 		self.__oper_2 = tf.nn.relu(tf.matmul(self.__oper_1, self.__w2) + self.__b2)
 
-		self.__w3 = tf.Variable(tf.random_normal([16, self.__output_size], stddev=0.01))
-		self.__b3 = tf.Variable(tf.random_normal([self.__output_size], stddev=0.01))
-		self.__y_output = tf.nn.softmax(tf.matmul(self.__oper_2, self.__w3) + self.__b3)
+		self.__w3 = tf.Variable(tf.random_normal([32, 16], stddev=0.01))
+		self.__b3 = tf.Variable(tf.random_normal([16], stddev=0.01))
+		self.__oper_3 = tf.nn.relu(tf.matmul(self.__oper_2, self.__w3) + self.__b3)
+
+		self.__w4 = tf.Variable(tf.random_normal([16, self.__output_size], stddev=0.01))
+		self.__b4 = tf.Variable(tf.random_normal([self.__output_size], stddev=0.01))
+		self.__y_output = tf.nn.softmax(tf.matmul(self.__oper_3, self.__w4) + self.__b4)
 
 		# tf.clip_by_value(A, min, max)：输入一个张量A，把A中的每一个元素的值都压缩在min和max之间。
 		# 小于min的让它等于min，大于max的元素的值等于max, 这里防止计算log(0)
-		self.__cross_entropy = tf.reduce_mean(
-			-tf.reduce_sum(
-				self.__y_input * tf.log(tf.clip_by_value(self.__y_output, 1e-10, 1.0)), reduction_indices=[1]
-			)
+		# self.__cross_entropy = tf.reduce_mean(
+		# 	-tf.reduce_sum(
+		# 		self.__y_input * tf.log(tf.clip_by_value(self.__y_output, 1e-10, 1.0)), reduction_indices=[1]
+		# 	)
+		# )
+
+		self.__loss = tf.reduce_mean(
+			tf.pow(self.__y_output - self.__y_input, 2)
 		)
-		self.__train_step = tf.train.AdamOptimizer(self.__learn_rate).minimize(self.__cross_entropy)
+		self.__train_step = tf.train.AdamOptimizer(self.__learn_rate).minimize(self.__loss)
 
 	def __create_checkpoint_dir(self):
 		self.__checkpoint_dir = os.path.join(os.path.join(os.path.curdir, 'checkpoints'), self.__model_name)
